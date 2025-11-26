@@ -88,7 +88,6 @@ const TerminalApp: React.FC = () => {
   const {
     markDaemonKilled,
     closeAllWindows,
-    showShutdownModal,
   } = useWindowManager();
 
   const [lines, setLines] = useState<Line[]>(INITIAL_LINES);

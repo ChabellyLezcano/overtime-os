@@ -41,6 +41,7 @@ interface WindowManagerContextValue {
   moveWindow: (id: string, x: number, y: number) => void;
   toggleMinimize: (id: string) => void;
   toggleMaximize: (id: string) => void;
+  hideShutdownModal: () => void;
 
   markDaemonKilled: () => void;
   powerOff: () => void;
@@ -165,6 +166,9 @@ export const WindowManagerProvider: React.FC<{ children: ReactNode }> = ({
 
     markDaemonKilled,
     powerOff,
+    hideShutdownModal: function (): void {
+      throw new Error('Function not implemented.');
+    }
   };
 
   return (

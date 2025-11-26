@@ -69,6 +69,7 @@ const Desktop: React.FC = () => {
 
   useEffect(() => {
     if (daemonKilled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowSuccessModal(true);
     }
   }, [daemonKilled]);
