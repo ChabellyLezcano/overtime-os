@@ -34,6 +34,7 @@ const EXPECTED_FRAGMENTS = [
   'BUGS-FIXED',
   'MERGE-CLEAN',
   'SYSTEM-DRAINED',
+  'FIREWALL-MAZE',
 ] as const;
 
 type ExpectedFragment = (typeof EXPECTED_FRAGMENTS)[number];
@@ -56,7 +57,7 @@ function validateKillCode(killCode: string): { ok: boolean; reason?: string } {
     if (!givenSet.has(frag)) {
       return {
         ok: false,
-        reason: `The fragment "${frag}" is missing from the kill code.`,
+        reason: `The fragment "${frag}" is missing from the kill code.`
       };
     }
   }
@@ -65,7 +66,7 @@ function validateKillCode(killCode: string): { ok: boolean; reason?: string } {
     if (!expectedSet.has(frag as ExpectedFragment)) {
       return {
         ok: false,
-        reason: `The fragment "${frag}" does not belong to the official kill code.`,
+        reason: `The fragment "${frag}" does not belong to the official kill code.`
       };
     }
   }
@@ -77,18 +78,17 @@ function readFirewallStatus() {
   if (typeof window === 'undefined') {
     return { solved: false, armed: false };
   }
-  const solved = window.localStorage.getItem('overtime-firewall-solved') === 'true';
-  const armed = window.localStorage.getItem('overtime-firewall-armed') === 'true';
+  const solved =
+    window.localStorage.getItem('overtime-firewall-solved') === 'true';
+  const armed =
+    window.localStorage.getItem('overtime-firewall-armed') === 'true';
   return { solved, armed };
 }
 
 const TERMINAL_CWD = '~/overtime-os';
 
 const TerminalApp: React.FC = () => {
-  const {
-    markDaemonKilled,
-    closeAllWindows,
-  } = useWindowManager();
+  const { markDaemonKilled, closeAllWindows } = useWindowManager();
 
   const [lines, setLines] = useState<Line[]>(INITIAL_LINES);
   const [input, setInput] = useState('');
@@ -128,7 +128,8 @@ const TerminalApp: React.FC = () => {
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHistoryIndex((prev) => {
-        const nextIndex = prev === null ? history.length - 1 : Math.max(prev - 1, 0);
+        const nextIndex =
+          prev === null ? history.length - 1 : Math.max(prev - 1, 0);
         setInput(history[nextIndex] ?? '');
         return nextIndex;
       });
@@ -178,8 +179,9 @@ const TerminalApp: React.FC = () => {
             '  history                      Show command history (last 20).',
             '  status                       Show puzzle / daemon status.',
             '  hint                         Get a small hint about what to do next.',
+            '  overtimectl arm-firewall     Arm the firewall after solving the Firewall Maze.',
             '',
-            '  shutdown-overtime-daemon <KILL_CODE>',
+            '  shutdown-overtime-daemon <KILL_CODE_1>+<KILL_CODE_2>...',
             '                               Attempt to shut down the overtime daemon using the final kill code.',
             '',
             'Kill code fragments appear in:',
@@ -247,10 +249,7 @@ const TerminalApp: React.FC = () => {
 
         pushLine(
           'output',
-          [
-            'System status:',
-            `  ${firewallStatus}`,
-          ].join('\n'),
+          ['System status:', `  ${firewallStatus}`].join('\n'),
         );
         break;
       }
@@ -366,7 +365,7 @@ const TerminalApp: React.FC = () => {
               '  shutdown-overtime-daemon <KILL_CODE>',
               '',
               'Example:',
-              '  shutdown-overtime-daemon KILL-OVERTIME-NOTES+PLAYER-WAVE-ALIGNED+BUGS-FIXED+MERGE-CLEAN+SYSTEM-DRAINED',
+              '  shutdown-overtime-daemon KILL-OVERTIME-NOTES+PLAYER-WAVE-ALIGNED+BUGS-FIXED+MERGE-CLEAN+SYSTEM-DRAINED+FIREWALL-MAZE',
             ].join('\n'),
           );
           break;
@@ -427,11 +426,11 @@ const TerminalApp: React.FC = () => {
             '',
             '>>> OVERTIME DAEMON TERMINATED <<<',
             '',
-            'Showing shutdown summary modal so you can finally power off OvertimeOS…',
+            'A shutdown summary will appear. Then you can use the Power app to turn OvertimeOS off.',
           ].join('\n'),
         );
 
-        // Cerrar todas las ventanas (incluida esta terminal)
+        // Close all windows (including this terminal).
         closeAllWindows();
 
         break;
