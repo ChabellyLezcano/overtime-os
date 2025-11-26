@@ -405,6 +405,7 @@ const FirewallApp: React.FC = () => {
                   <span className="font-semibold">+FIREWALL-MAZE</span>
                 </p>
                 <p className="mt-1 text-slate-300">
+                  REMEMBER ARM THE FIREWALL NOW WITH: ´arm-firewall´
                   Add this to your StickyPad. Combined with the other fragments, this
                   helps the final terminal command bypass the daemon&apos;s last
                   defenses.
