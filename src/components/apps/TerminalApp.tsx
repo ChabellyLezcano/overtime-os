@@ -34,7 +34,6 @@ const EXPECTED_FRAGMENTS = [
   'BUGS-FIXED',
   'MERGE-CLEAN',
   'SYSTEM-DRAINED',
-  'FIREWALL-MAZE',
 ] as const;
 
 type ExpectedFragment = (typeof EXPECTED_FRAGMENTS)[number];
@@ -57,7 +56,7 @@ function validateKillCode(killCode: string): { ok: boolean; reason?: string } {
     if (!givenSet.has(frag)) {
       return {
         ok: false,
-        reason: `The fragment "${frag}" is missing from the kill code.`
+        reason: `The fragment "${frag}" is missing from the kill code.`,
       };
     }
   }
@@ -66,7 +65,7 @@ function validateKillCode(killCode: string): { ok: boolean; reason?: string } {
     if (!expectedSet.has(frag as ExpectedFragment)) {
       return {
         ok: false,
-        reason: `The fragment "${frag}" does not belong to the official kill code.`
+        reason: `The fragment "${frag}" does not belong to the official kill code.`,
       };
     }
   }
@@ -78,10 +77,8 @@ function readFirewallStatus() {
   if (typeof window === 'undefined') {
     return { solved: false, armed: false };
   }
-  const solved =
-    window.localStorage.getItem('overtime-firewall-solved') === 'true';
-  const armed =
-    window.localStorage.getItem('overtime-firewall-armed') === 'true';
+  const solved = window.localStorage.getItem('overtime-firewall-solved') === 'true';
+  const armed = window.localStorage.getItem('overtime-firewall-armed') === 'true';
   return { solved, armed };
 }
 
@@ -128,8 +125,7 @@ const TerminalApp: React.FC = () => {
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHistoryIndex((prev) => {
-        const nextIndex =
-          prev === null ? history.length - 1 : Math.max(prev - 1, 0);
+        const nextIndex = prev === null ? history.length - 1 : Math.max(prev - 1, 0);
         setInput(history[nextIndex] ?? '');
         return nextIndex;
       });
@@ -179,18 +175,16 @@ const TerminalApp: React.FC = () => {
             '  history                      Show command history (last 20).',
             '  status                       Show puzzle / daemon status.',
             '  hint                         Get a small hint about what to do next.',
-            '  arm-firewall                 Arm the firewall AFTER solving the Firewall Maze.',
-            '  overtimectl arm-firewall     Activate firewall',
             '',
             '  shutdown-overtime-daemon <KILL_CODE_1>+<KILL_CODE_2>...',
             '                               Attempt to shut down the overtime daemon using the final kill code.',
             '',
             'Kill code fragments appear in:',
             '  • Notes / StickyPad',
-            '  • Media Player (wave alignment)',
+            '  • Media Player',
             '  • Bug Smasher',
             '  • Merge Tool',
-            '  • Firewall Maze',
+            '  • Firewall',
           ].join('\n'),
         );
         break;
@@ -248,10 +242,7 @@ const TerminalApp: React.FC = () => {
             : 'Firewall: solved but NOT armed  (run "overtimectl arm-firewall")'
           : 'Firewall: not solved  (open the Firewall Maze app)';
 
-        pushLine(
-          'output',
-          ['System status:', `  ${firewallStatus}`].join('\n'),
-        );
+        pushLine('output', ['System status:', `  ${firewallStatus}`].join('\n'));
         break;
       }
 
@@ -457,7 +448,7 @@ const TerminalApp: React.FC = () => {
           return (
             <div
               key={line.id}
-              className={`${base} border border-sky-500/40 bg-slate-900/90 text-sky-100 flex items-start gap-1`}
+              className={`${base} flex items-start gap-1 border border-sky-500/40 bg-slate-900/90 text-sky-100`}
             >
               <span className="mt-0.5 text-sky-400">◆</span>
               <span>{line.text}</span>
@@ -469,9 +460,9 @@ const TerminalApp: React.FC = () => {
           return (
             <div
               key={line.id}
-              className={`${base} bg-transparent text-sky-200 flex items-start gap-1`}
+              className={`${base} flex items-start gap-1 bg-transparent text-sky-200`}
             >
-              <span className="text-sky-500 font-mono">›</span>
+              <span className="font-mono text-sky-500">›</span>
               <span className="font-mono">{line.text}</span>
             </div>
           );
@@ -490,36 +481,39 @@ const TerminalApp: React.FC = () => {
   );
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-950/95 text-slate-100 border border-slate-800/80 overflow-hidden shadow-[0_0_40px_rgba(15,23,42,0.85)]">
-      {/* Output */}
-      <div className="relative flex-1 min-h-0">
-        <div className="pointer-events-none absolute inset-0 opacity-[0.06] bg-[linear-gradient(to_bottom,#0f172a_1px,transparent_1px)] bg-size-[100%_18px]" />
+    <div className="flex h-full w-full flex-col overflow-hidden border border-slate-800/80 bg-slate-950/95 text-slate-100 shadow-[0_0_40px_rgba(15,23,42,0.85)]">
+      {/* Output area fills all available height above the prompt */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {/* Background grid */}
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,#0f172a_1px,transparent_1px)] bg-size-[100%_18px] opacity-[0.06]" />
+
+        {/* Scrollable output */}
         <div
           ref={terminalRef}
-          className="relative z-10 flex-1 h-full overflow-y-auto p-3 sm:p-4 font-mono"
+          className="relative z-10 h-full overflow-y-auto p-3 font-mono sm:p-4"
         >
           {renderedLines}
         </div>
       </div>
 
-      {/* Prompt */}
+      {/* Prompt (fixed at the bottom, never overflows the frame) */}
       <form
         onSubmit={handleSubmit}
-        className="border-t border-slate-800/80 px-3 sm:px-4 py-2.5 flex items-center gap-2 bg-slate-950/98"
+        className="flex min-w-0 shrink-0 items-center gap-2 border-t border-slate-800/80 bg-slate-950/98 px-3 py-2.5 sm:px-4"
       >
-        <span className="font-mono text-[11px] sm:text-xs text-slate-400 hidden sm:inline">
+        {/* Prompt prefix (cwd) – can shrink and truncate */}
+        <span className="text-caption min-w-0 truncate font-mono text-slate-400">
           {cwd} $
         </span>
-        <span className="font-mono text-[11px] text-slate-400 sm:hidden">
-          $
-        </span>
+
+        {/* Input grows to fill remaining width, never overflows window */}
         <input
           ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleHistoryNav}
-          className="flex-1 bg-transparent outline-none border-none text-slate-100 placeholder:text-slate-500 text-[11px] sm:text-xs"
+          className="text-body min-w-0 flex-1 border-none bg-transparent text-slate-100 outline-none placeholder:text-slate-500"
           placeholder='type "help" or try: shutdown-overtime-daemon <KILL_CODE>'
           autoComplete="off"
         />
@@ -527,5 +521,4 @@ const TerminalApp: React.FC = () => {
     </div>
   );
 };
-
 export default TerminalApp;

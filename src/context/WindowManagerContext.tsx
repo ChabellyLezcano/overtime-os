@@ -11,15 +11,15 @@ import React, {
 
 export interface WindowInstance {
   id: string;
-  appId: string;
-  title: string;
   x: number;
   y: number;
   width: number;
   height: number;
-  zIndex: number;
   minimized: boolean;
   maximized: boolean;
+  zIndex: number;
+  appId: string;
+  title: string;
 }
 
 interface OpenOptions {
@@ -39,17 +39,17 @@ interface WindowManagerContextValue {
   closeAllWindows: () => void;
   focusWindow: (id: string) => void;
   moveWindow: (id: string, x: number, y: number) => void;
+  resizeWindow: (id: string, width: number, height: number) => void;
   toggleMinimize: (id: string) => void;
   toggleMaximize: (id: string) => void;
+
   hideShutdownModal: () => void;
 
   markDaemonKilled: () => void;
   powerOff: () => void;
 }
 
-const WindowManagerContext = createContext<WindowManagerContextValue | null>(
-  null,
-);
+const WindowManagerContext = createContext<WindowManagerContextValue | null>(null);
 
 export const useWindowManager = () => {
   const ctx = useContext(WindowManagerContext);
@@ -72,34 +72,47 @@ export const WindowManagerProvider: React.FC<{ children: ReactNode }> = ({
   const bringToFront = useCallback((id: string) => {
     setWindows((prev) => {
       const maxZ = prev.reduce((acc, w) => Math.max(acc, w.zIndex), 0);
-      return prev.map((w) =>
-        w.id === id ? { ...w, zIndex: maxZ + 1 } : w,
-      );
+      return prev.map((w) => (w.id === id ? { ...w, zIndex: maxZ + 1 } : w));
     });
   }, []);
 
-  const openWindow = useCallback(
-    (appId: string, options?: OpenOptions) => {
-      setWindows((prev) => {
-        const maxZ = prev.reduce((acc, w) => Math.max(acc, w.zIndex), 0);
-        const id = nextId();
-        const newWin: WindowInstance = {
-          id,
-          appId,
-          title: appId,
-          x: options?.x ?? 80,
-          y: options?.y ?? 80,
-          width: options?.width ?? 480,
-          height: options?.height ?? 320,
-          zIndex: maxZ + 1,
-          minimized: false,
-          maximized: false,
-        };
-        return [...prev, newWin];
-      });
-    },
-    [],
-  );
+  const openWindow = useCallback((appId: string, options?: OpenOptions) => {
+    setWindows((prev) => {
+      const maxZ = prev.reduce((acc, w) => Math.max(acc, w.zIndex), 0);
+
+      // Look for an existing window of this app
+      const existing = prev.find((w) => w.appId === appId);
+
+      if (existing) {
+        // Reuse it: un-minimize (if needed) and bring it to front
+        return prev.map((w) =>
+          w.id === existing.id
+            ? {
+                ...w,
+                minimized: false,
+                zIndex: maxZ + 1,
+              }
+            : w,
+        );
+      }
+
+      // No existing instance -> create new window
+      const id = nextId();
+      const newWin: WindowInstance = {
+        id,
+        appId,
+        title: appId,
+        x: options?.x ?? 80,
+        y: options?.y ?? 80,
+        width: options?.width ?? 480,
+        height: options?.height ?? 320,
+        zIndex: maxZ + 1,
+        minimized: false,
+        maximized: false,
+      };
+      return [...prev, newWin];
+    });
+  }, []);
 
   const closeWindow = useCallback((id: string) => {
     setWindows((prev) => prev.filter((w) => w.id !== id));
@@ -117,38 +130,36 @@ export const WindowManagerProvider: React.FC<{ children: ReactNode }> = ({
   );
 
   const moveWindow = useCallback((id: string, x: number, y: number) => {
-    setWindows((prev) =>
-      prev.map((w) => (w.id === id ? { ...w, x, y } : w)),
-    );
+    setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, x, y } : w)));
+  }, []);
+
+  const resizeWindow = useCallback((id: string, width: number, height: number) => {
+    setWindows((prev) => prev.map((w) => (w.id === id ? { ...w, width, height } : w)));
   }, []);
 
   const toggleMinimize = useCallback((id: string) => {
     setWindows((prev) =>
-      prev.map((w) =>
-        w.id === id ? { ...w, minimized: !w.minimized } : w,
-      ),
+      prev.map((w) => (w.id === id ? { ...w, minimized: !w.minimized } : w)),
     );
   }, []);
 
   const toggleMaximize = useCallback((id: string) => {
     setWindows((prev) =>
-      prev.map((w) =>
-        w.id === id ? { ...w, maximized: !w.maximized } : w,
-      ),
+      prev.map((w) => (w.id === id ? { ...w, maximized: !w.maximized } : w)),
     );
   }, []);
 
-  // ✅ Called from Terminal when kill code is accepted
   const markDaemonKilled = useCallback(() => {
     setDaemonKilled(true);
   }, []);
 
-  // ✅ Called from PowerApp when user presses "Power off now"
   const powerOff = useCallback(() => {
-    // Optional: close windows to avoid flicker
     setWindows([]);
-    // Trigger final black screen in Desktop
     setIsShuttingDown(true);
+  }, []);
+
+  const hideShutdownModal = useCallback(() => {
+    setIsShuttingDown(false);
   }, []);
 
   const value: WindowManagerContextValue = {
@@ -161,14 +172,13 @@ export const WindowManagerProvider: React.FC<{ children: ReactNode }> = ({
     closeAllWindows,
     focusWindow,
     moveWindow,
+    resizeWindow,
     toggleMinimize,
     toggleMaximize,
 
+    hideShutdownModal,
     markDaemonKilled,
     powerOff,
-    hideShutdownModal: function (): void {
-      throw new Error('Function not implemented.');
-    }
   };
 
   return (

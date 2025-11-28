@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { copyToClipboard } from '@/utils/copyToClipboard';
 
 const BAR_COUNT = 32;
-
-// Hidden target
-const TARGET_PROGRESS = 74; // 0–100
-const TARGET_VOLUME = 63;   // 0–100
-
+const TARGET_PROGRESS = 95;
+const TARGET_VOLUME = 63;
 const TWO_PI = Math.PI * 2;
+const STORAGE_KEY = 'wave-calibrator-solved';
+const SOLVED_TTL_MS = 15 * 60 * 1000;
+const WAVE_FRAGMENT = '+PLAYER-WAVE-ALIGNED';
 
 function generateWaveValues(phase: number, amplitude: number): number[] {
   const values: number[] = [];
@@ -27,27 +28,63 @@ const MediaPlayerApp: React.FC = () => {
   const [puzzleSolved, setPuzzleSolved] = useState(false);
   const [alignmentPeak, setAlignmentPeak] = useState(0);
 
+  // Shared temporal offset so both waves "breathe" together
+  const [phaseOffset, setPhaseOffset] = useState(0);
+  const [copied, setCopied] = useState(false);
+
   const targetPhase = (TARGET_PROGRESS / 100) * TWO_PI;
   const targetAmplitude = 0.9;
-  const targetWave = generateWaveValues(targetPhase, targetAmplitude);
 
   const currentPhase = (progress / 100) * TWO_PI;
   const currentAmplitude = 0.4 + (volume / 100) * 0.6;
-  const currentWave = generateWaveValues(currentPhase, currentAmplitude);
 
-  const progressDiff = Math.abs(progress - TARGET_PROGRESS);
-  const volumeDiff = Math.abs(volume - TARGET_VOLUME);
-  const rawScore = Math.max(
-    0,
-    100 - (progressDiff * 3 + volumeDiff * 1.5),
-  );
-  const alignmentScore = Math.min(100, rawScore);
-
+  // Load persisted solved state on mount
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAlignmentPeak((prev) => (alignmentScore > prev ? alignmentScore : prev));
-  }, [alignmentScore]);
+    if (typeof window === 'undefined') return;
 
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+
+      const data = JSON.parse(raw) as { solved?: boolean; expiresAt?: number };
+
+      if (!data?.expiresAt) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      if (Date.now() < data.expiresAt && data.solved) {
+        setPuzzleSolved(true);
+        setAlignmentPeak(100);
+      } else {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Error reading solved state from localStorage', error);
+    }
+  }, []);
+
+  // Animate phaseOffset while playing (both target and current waves move)
+  useEffect(() => {
+    if (!isPlaying || puzzleSolved) return;
+
+    let frameId: number;
+    const speed = 0.04;
+
+    const loop = () => {
+      setPhaseOffset((prev) => {
+        let next = prev + speed;
+        if (next > TWO_PI) next -= TWO_PI;
+        return next;
+      });
+      frameId = requestAnimationFrame(loop);
+    };
+
+    frameId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(frameId);
+  }, [isPlaying, puzzleSolved]);
+
+  // Auto-progress movement while playing
   useEffect(() => {
     if (!isPlaying || puzzleSolved) return;
 
@@ -61,15 +98,51 @@ const MediaPlayerApp: React.FC = () => {
     return () => clearInterval(interval);
   }, [isPlaying, puzzleSolved]);
 
-  const handlePlayPause = () => {
-    // Check success when going from playing -> paused
-    if (isPlaying && !puzzleSolved) {
-      if (alignmentScore >= 85) {
-        setPuzzleSolved(true);
-        setIsPlaying(false);
-        return;
-      }
+  const targetWave = useMemo(
+    () => generateWaveValues(targetPhase + phaseOffset, targetAmplitude),
+    [targetPhase, targetAmplitude, phaseOffset],
+  );
+
+  const currentWave = useMemo(
+    () => generateWaveValues(currentPhase + phaseOffset, currentAmplitude),
+    [currentPhase, phaseOffset, currentAmplitude],
+  );
+
+  const progressDiff = Math.abs(progress - TARGET_PROGRESS);
+  const volumeDiff = Math.abs(volume - TARGET_VOLUME);
+
+  const rawScore = Math.max(0, 100 - (progressDiff * 2.2 + volumeDiff * 1.2));
+  const alignmentScore = Math.min(100, rawScore);
+
+  useEffect(() => {
+    setAlignmentPeak((prev) => (alignmentScore > prev ? alignmentScore : prev));
+  }, [alignmentScore]);
+
+  // Persist solved state to localStorage with TTL
+  const persistSolvedState = () => {
+    if (typeof window === 'undefined') return;
+
+    const payload = {
+      solved: true,
+      expiresAt: Date.now() + SOLVED_TTL_MS,
+    };
+
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error('Error saving solved state to localStorage', error);
     }
+  };
+
+  const handlePlayPause = () => {
+    // If not solved yet and alignment is high enough, solve
+    if (!puzzleSolved && alignmentScore >= 80) {
+      setPuzzleSolved(true);
+      setIsPlaying(false);
+      persistSolvedState();
+      return;
+    }
+
     setIsPlaying((prev) => !prev);
   };
 
@@ -81,36 +154,45 @@ const MediaPlayerApp: React.FC = () => {
     setVolume(value);
   };
 
+  const handleCopyFragment = () => {
+    void copyToClipboard(WAVE_FRAGMENT, {
+      setCopied,
+      timeoutMs: 1500,
+    });
+  };
+
   const alignmentColor =
-    alignmentScore >= 80
+    alignmentScore >= 95
       ? 'text-emerald-300'
       : alignmentScore >= 50
-      ? 'text-amber-300'
-      : 'text-rose-300';
+        ? 'text-amber-300'
+        : 'text-rose-300';
 
   const alignmentBarColor =
-    alignmentScore >= 80
+    alignmentScore >= 95
       ? 'from-emerald-400 via-emerald-300 to-emerald-500'
       : alignmentScore >= 50
-      ? 'from-amber-400 via-amber-300 to-amber-500'
-      : 'from-rose-500 via-rose-400 to-rose-500';
+        ? 'from-amber-400 via-amber-300 to-amber-500'
+        : 'from-rose-500 via-rose-400 to-rose-500';
 
   return (
-    <div className="w-full h-full flex flex-col p-3 sm:p-4 text-xs sm:text-md text-slate-100 overflow-hidden">
+    <div className="text-body flex h-full w-full flex-col overflow-hidden p-3 text-slate-100 sm:p-4">
       {/* HEADER */}
-      <div className="flex items-center justify-between mb-3 sm:mb-4">
+      <div className="mb-3 flex items-center justify-between sm:mb-4">
         <div className="min-w-0">
-          <h2 className="text-md sm:text-base font-semibold text-sky-200 truncate">
-            Focus Wave Calibrator
-          </h2>
-          <p className="text-[11px] text-slate-300 truncate">
-            Align your focus wave with the daemon&apos;s target pattern.
+          <h2 className="text-heading-sm truncate text-sky-200">Focus Wave Calibrator</h2>
+          <p className="relative z-10 mb-2 text-xs text-slate-400 sm:mb-3">
+            Align the <span className="font-semibold text-slate-200">colored wave</span>{' '}
+            with the{' '}
+            <span className="font-semibold text-slate-400">grey target wave</span>. Use
+            the position and volume controls, then press the button when they visually
+            match.
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1 text-[10px] text-slate-400">
+        <div className="flex flex-col items-end gap-1 text-xs text-slate-400">
           <span>Mode: Wave alignment</span>
           <span
-            className={`px-2 py-0.5 rounded-full border text-[10px] ${
+            className={`rounded-full border px-2 py-0.5 text-xs ${
               puzzleSolved
                 ? 'border-emerald-400/80 bg-emerald-500/15 text-emerald-200'
                 : 'border-rose-400/80 bg-rose-500/10 text-rose-200'
@@ -121,38 +203,17 @@ const MediaPlayerApp: React.FC = () => {
         </div>
       </div>
 
-      {/* CONTENIDO SCROLLABLE */}
-      <div className="flex-1 min-h-0 flex flex-col gap-3 sm:gap-4 overflow-y-auto">
+      {/* SCROLLABLE CONTENT */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto sm:gap-4">
         {/* WAVE CARD */}
-        <div className="relative rounded-2xl bg-slate-950/90 border border-slate-800/80 p-3 sm:p-4 overflow-hidden">
-          {/* Glow when solved */}
+        <div className="relative overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/90 p-3 sm:p-4">
           {puzzleSolved && (
-            <div className="pointer-events-none absolute inset-0 bg-linear-to-br from-emerald-400/20 via-sky-400/10 to-fuchsia-400/25 blur-3xl" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-400/20 via-sky-400/10 to-fuchsia-400/25 blur-3xl" />
           )}
-
-          {/* Success badge grande */}
-          {puzzleSolved && (
-            <div className="absolute top-2 inset-x-0 flex justify-center z-10">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/80 text-[10px] sm:text-[11px] text-emerald-100 shadow-[0_0_18px_rgba(52,211,153,0.7)] backdrop-blur">
-                <span className="text-[12px]">✨</span>
-                <span className="font-semibold tracking-[0.14em] uppercase">
-                  Alignment locked
-                </span>
-                <span className="text-[12px]">✓</span>
-              </div>
-            </div>
-          )}
-
-          <p className="text-[11px] text-slate-400 mb-2 sm:mb-3">
-            Align the{' '}
-            <span className="font-semibold text-slate-200">colored wave</span> with the{' '}
-            <span className="font-semibold text-slate-400">grey target wave</span>. Use
-            the position and volume controls, then pause when they visually match.
-          </p>
 
           {/* Waves */}
-          <div className="relative w-full h-28 sm:h-32 mt-1">
-            {/* Target wave (grey) */}
+          <div className="relative mt-1 h-28 w-full sm:h-32">
+            {/* Target */}
             <div className="absolute inset-1 flex items-end gap-[3px] opacity-35">
               {targetWave.map((v, i) => (
                 <div
@@ -163,7 +224,7 @@ const MediaPlayerApp: React.FC = () => {
               ))}
             </div>
 
-            {/* Current wave (color) */}
+            {/* Current */}
             <div className="absolute inset-1 flex items-end gap-[3px]">
               {currentWave.map((v, i) => (
                 <div
@@ -171,7 +232,7 @@ const MediaPlayerApp: React.FC = () => {
                   className={`flex-1 rounded-full ${
                     puzzleSolved
                       ? 'bg-emerald-400 shadow-[0_0_16px_rgba(52,211,153,0.9)]'
-                      : 'bg-linear-to-t from-sky-500 via-fuchsia-400 to-emerald-300 shadow-[0_0_10px_rgba(56,189,248,0.55)]'
+                      : 'bg-gradient-to-t from-sky-500 via-fuchsia-400 to-emerald-300 shadow-[0_0_10px_rgba(56,189,248,0.55)]'
                   }`}
                   style={{ height: `${v * 100}%` }}
                 />
@@ -180,21 +241,21 @@ const MediaPlayerApp: React.FC = () => {
           </div>
 
           {/* Alignment meter */}
-          <div className="mt-3">
-            <div className="flex items-center justify-between text-[11px] mb-1">
+          <div className="relative z-10 mt-3">
+            <div className="mb-1 flex items-center justify-between text-xs">
               <span className="text-slate-400">Alignment</span>
               <span className={`${alignmentColor} font-semibold`}>
                 {Math.round(alignmentScore)} %
               </span>
             </div>
-            <div className="w-full h-2 rounded-full bg-slate-800/80 overflow-hidden">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800/80">
               <div
-                className={`h-full bg-linear-to-r ${alignmentBarColor} transition-all`}
+                className={`h-full bg-gradient-to-r ${alignmentBarColor} transition-all`}
                 style={{ width: `${alignmentScore}%` }}
               />
             </div>
             {alignmentPeak > 0 && (
-              <p className="mt-1 text-[10px] text-slate-500">
+              <p className="mt-1 text-xs text-slate-500">
                 Best alignment so far:{' '}
                 <span className="font-semibold text-slate-300">
                   {Math.round(alignmentPeak)} %
@@ -204,17 +265,16 @@ const MediaPlayerApp: React.FC = () => {
           </div>
         </div>
 
-        {/* CONTROLES */}
-        <div className="rounded-2xl bg-slate-950/90 border border-slate-800/80 p-3 sm:p-4 space-y-3">
+        {/* CONTROLS */}
+        <div className="space-y-3 rounded-2xl border border-slate-800/80 bg-slate-950/90 p-3 sm:p-4">
           {/* Progress */}
           <div>
-            <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+            <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
               <span>Position: {Math.round(progress)}%</span>
-              <span>Target: ~{TARGET_PROGRESS}%</span>
             </div>
-            <div className="w-full h-1.5 bg-slate-800/80 rounded-full overflow-hidden mb-1">
+            <div className="mb-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-800/80">
               <div
-                className="h-full bg-linear-to-r from-sky-400 via-fuchsia-400 to-emerald-400 transition-all"
+                className="h-full bg-gradient-to-r from-sky-400 via-fuchsia-400 to-emerald-400 transition-all"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -228,22 +288,28 @@ const MediaPlayerApp: React.FC = () => {
             />
           </div>
 
-          {/* Volume + play */}
+          {/* Volume + play/check */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <button
               type="button"
               onClick={handlePlayPause}
-              className={`px-4 py-1.5 rounded-full text-[11px] font-semibold shadow-md transition
-                ${
-                  isPlaying
-                    ? 'bg-rose-500 hover:bg-rose-400 text-slate-950 shadow-rose-500/40'
-                    : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/40'
-                }`}
+              className={`rounded-full px-4 py-1.5 text-xs font-semibold shadow-md transition ${
+                puzzleSolved
+                  ? 'cursor-default bg-emerald-500/90 text-slate-950 shadow-emerald-500/40'
+                  : isPlaying
+                    ? 'bg-rose-500 text-slate-950 shadow-rose-500/40 hover:bg-rose-400'
+                    : 'bg-sky-500 text-slate-950 shadow-sky-500/40 hover:bg-sky-400'
+              }`}
+              disabled={puzzleSolved}
             >
-              {isPlaying ? 'Pause & check alignment' : 'Play wave'}
+              {puzzleSolved
+                ? 'Alignment complete'
+                : isPlaying
+                  ? 'Pause / Check alignment'
+                  : 'Check alignment / Play'}
             </button>
 
-            <div className="flex items-center gap-2 text-[10px] text-slate-300">
+            <div className="flex items-center gap-2 text-xs text-slate-300">
               <span>🔊</span>
               <input
                 type="range"
@@ -251,54 +317,61 @@ const MediaPlayerApp: React.FC = () => {
                 max={100}
                 value={volume}
                 onChange={(e) => handleVolumeChange(Number(e.target.value))}
-                className="w-24 sm:w-32 cursor-pointer"
+                className="w-24 cursor-pointer sm:w-32"
               />
               <span className="w-10 text-right">{volume}%</span>
             </div>
           </div>
         </div>
 
-        {/* PANEL DE PISTA / ÉXITO */}
-        <div className="rounded-2xl bg-slate-950/95 border border-slate-800/80 p-3 sm:p-4 text-[11px]">
+        {/* HINT / SUCCESS PANEL */}
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-950/95 p-3 text-xs sm:p-4">
           {!puzzleSolved ? (
             <>
-              <p className="text-slate-300 mb-1">
+              <p className="mb-1 text-slate-300">
                 The overtime daemon loves perfectly looped focus waves. Your goal is to
                 disrupt its ideal pattern by matching it once and then breaking it.
               </p>
-              <p className="text-slate-400 mb-1">
+              <p className="mb-1 text-slate-400">
                 Use the controls to visually align both waves. When you think they are
-                aligned, hit{' '}
-                <span className="font-semibold text-slate-100">Pause</span> while the wave
-                is still moving.
+                aligned, press the button to check alignment.
               </p>
               <p className="text-slate-500">
-                Only a <span className="font-semibold text-slate-100">near-perfect</span>{' '}
-                alignment will make the hidden debug overlay appear.
+                A <span className="font-semibold text-slate-100">high</span> alignment
+                score will unlock something hidden in the player.
               </p>
             </>
           ) : (
             <div className="space-y-2">
-              <p className="text-emerald-300 font-semibold">
-                Wave pattern locked – the daemon&apos;s favorite loop is broken.
-              </p>
-              <p className="text-slate-200">
-                In the flicker of a debug overlay, the player reveals something the daemon
-                didn&apos;t want you to see:
-              </p>
-
-              {/* Bloque de éxito bien marcado */}
-              <div className="mt-1 rounded-xl border border-emerald-400/80 bg-linear-to-br from-emerald-500/15 via-slate-950 to-emerald-500/10 p-3 shadow-[0_0_20px_rgba(52,211,153,0.45)]">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-300 mb-1">
+              <div className="mt-1 space-y-2 rounded-xl border border-emerald-400/80 bg-gradient-to-br from-emerald-500/15 via-slate-950 to-emerald-500/10 p-3 shadow-[0_0_20px_rgba(52,211,153,0.45)]">
+                <p className="mb-1 text-xs tracking-[0.16em] text-emerald-300 uppercase">
                   Kill code fragment unlocked
                 </p>
-                <p className="font-mono text-[11px] text-emerald-100 break-all">
-                  Fourth fragment of the kill code:
-                  <br />
-                  <span className="font-semibold">
-                    +PLAYER-WAVE-ALIGNED
-                  </span>
-                </p>
+
+                {/* Input + copy button */}
+                <div className="space-y-1">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      readOnly
+                      value={WAVE_FRAGMENT}
+                      className="flex-1 overflow-x-auto rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-[11px] text-emerald-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyFragment}
+                      className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-slate-950 shadow-md shadow-emerald-500/40 transition hover:bg-emerald-400"
+                    >
+                      {copied ? 'Copied ✓' : 'Copy'}
+                    </button>
+                  </div>
+                  {copied && (
+                    <p className="text-[10px] text-emerald-300">
+                      Fragment copied. Paste it into your StickyPad alongside the other
+                      pieces of the kill code.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <p className="text-slate-400">

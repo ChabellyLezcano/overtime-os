@@ -1,3 +1,4 @@
+// src/components/desktop/Dock.tsx
 'use client';
 
 import React from 'react';
@@ -35,31 +36,39 @@ const dockItems: DockItem[] = [
 ];
 
 const Dock: React.FC = () => {
-  const { openWindow } = useWindowManager();
+  const { openWindow, windows } = useWindowManager();
 
   return (
     <div className="pointer-events-auto">
-      <div className="absolute bottom-4 inset-x-0 flex justify-center">
-        <div className="flex gap-3 px-4 py-2 rounded-3xl bg-slate-950/70 border border-slate-800/70 backdrop-blur-xl shadow-[0_18px_45px_rgba(15,23,42,0.8)]">
-          {dockItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => openWindow(item.id)}
-              className="flex flex-col items-center gap-1 cursor-pointer text-[10px] text-slate-300 group"
-            >
-              <div className="flex items-center justify-center shadow-md shadow-slate-900/80 group-hover:-translate-y-1 group-hover:shadow-[0_10px_25px_rgba(15,23,42,0.9)] transition">
-                <Image
-                  src={item.icon}
-                  alt={item.label}
-                  className="w-10 h-10 object-contain"
+      <div className="absolute inset-x-0 bottom-4 flex justify-center">
+        <div className="flex gap-3 rounded-3xl border border-slate-800/70 bg-slate-950/70 px-4 py-2 backdrop-blur-xl">
+          {dockItems.map((item) => {
+            const appWindow = windows.find((w) => w.appId === item.id);
+            const isMinimized = !!appWindow && appWindow.minimized;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => openWindow(item.id)}
+                className="group flex cursor-pointer flex-col items-center gap-1 text-[10px] text-slate-300"
+              >
+                <div className="flex items-center justify-center transition group-hover:-translate-y-1">
+                  <Image
+                    src={item.icon}
+                    alt={item.label}
+                    className="h-10 w-10 object-contain"
+                  />
+                </div>
+
+                <span
+                  className={`mt-0.5 h-1.5 w-1.5 rounded-full ${
+                    isMinimized ? 'bg-white' : 'bg-transparent'
+                  }`}
                 />
-              </div>
-              <span className="group-hover:text-slate-100 transition">
-                {item.label}
-              </span>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

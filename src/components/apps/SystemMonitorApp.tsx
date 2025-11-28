@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { copyToClipboard } from '@/utils/copyToClipboard'; // ajusta la ruta si hace falta
 
 interface Process {
   id: string;
@@ -54,20 +55,57 @@ const INITIAL_PROCESSES: Process[] = [
   },
 ];
 
+// LocalStorage config for this minigame
+const STORAGE_KEY = 'system-monitor-solved';
+const SOLVED_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+const SYSTEM_FRAGMENT = '+SYSTEM-DRAINED';
+
 const SystemMonitorApp: React.FC = () => {
-  const [processes, setProcesses] = useState<Process[]>(() =>
-    INITIAL_PROCESSES,
-  );
+  const [processes, setProcesses] = useState<Process[]>(() => INITIAL_PROCESSES);
   const [focusMode, setFocusMode] = useState(false);
   const [notificationsMuted, setNotificationsMuted] = useState(false);
   const [autoSyncOff, setAutoSyncOff] = useState(false);
   const [puzzleSolved, setPuzzleSolved] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Fake metric noise
   const [baselineCpu, setBaselineCpu] = useState(40);
   const [baselineMem, setBaselineMem] = useState(40);
 
+  // Load persisted solved state on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+
+      const data = JSON.parse(raw) as { solved?: boolean; expiresAt?: number };
+
+      if (!data?.expiresAt) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      if (Date.now() < data.expiresAt && data.solved) {
+        // Mark puzzle as solved and ensure daemon is terminated
+        setPuzzleSolved(true);
+        setProcesses((prev) =>
+          prev.map((p) => (p.id === 'daemon' ? { ...p, active: false } : p)),
+        );
+        setHint(null);
+      } else {
+        // Expired, clean up
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Error reading system monitor state from localStorage', error);
+    }
+  }, []);
+
+  // Animate baseline CPU/MEM noise while puzzle is not solved
   useEffect(() => {
     if (puzzleSolved) return;
 
@@ -87,15 +125,9 @@ const SystemMonitorApp: React.FC = () => {
     return () => clearInterval(interval);
   }, [puzzleSolved]);
 
-  const activeProcesses = useMemo(
-    () => processes.filter((p) => p.active),
-    [processes],
-  );
+  const activeProcesses = useMemo(() => processes.filter((p) => p.active), [processes]);
 
-  const daemon = useMemo(
-    () => processes.find((p) => p.type === 'daemon'),
-    [processes],
-  );
+  const daemon = useMemo(() => processes.find((p) => p.type === 'daemon'), [processes]);
 
   const totalCpu = useMemo(() => {
     const procCpu = activeProcesses.reduce((sum, p) => sum + p.cpu, 0);
@@ -122,9 +154,7 @@ const SystemMonitorApp: React.FC = () => {
   const daemonLoad = useMemo(() => {
     let value = 40;
 
-    const noiseCount = activeProcesses.filter(
-      (p) => p.type === 'noise',
-    ).length;
+    const noiseCount = activeProcesses.filter((p) => p.type === 'noise').length;
     value += noiseCount * 10;
 
     if (focusMode) value -= 12;
@@ -140,20 +170,32 @@ const SystemMonitorApp: React.FC = () => {
 
   const safeStrainThreshold = 38;
   const isDaemonKillEnabled =
-    !puzzleSolved &&
-    strainScore <= safeStrainThreshold &&
-    daemon?.active === true;
+    !puzzleSolved && strainScore <= safeStrainThreshold && daemon?.active === true;
 
   const toggleProcess = (id: string) => {
     if (puzzleSolved) return;
     if (id === 'daemon') return; // only kill via special button
 
     setProcesses((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, active: !p.active } : p,
-      ),
+      prev.map((p) => (p.id === id ? { ...p, active: !p.active } : p)),
     );
     setHint(null);
+  };
+
+  // Persist solved state to localStorage with TTL
+  const persistSolvedState = () => {
+    if (typeof window === 'undefined') return;
+
+    const payload = {
+      solved: true,
+      expiresAt: Date.now() + SOLVED_TTL_MS,
+    };
+
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error('Error saving system monitor state to localStorage', error);
+    }
   };
 
   const handleKillDaemon = () => {
@@ -167,58 +209,64 @@ const SystemMonitorApp: React.FC = () => {
     }
 
     setProcesses((prev) =>
-      prev.map((p) =>
-        p.id === 'daemon' ? { ...p, active: false } : p,
-      ),
+      prev.map((p) => (p.id === 'daemon' ? { ...p, active: false } : p)),
     );
     setPuzzleSolved(true);
     setHint(null);
+    persistSolvedState();
+  };
+
+  const handleCopyFragment = () => {
+    void copyToClipboard(SYSTEM_FRAGMENT, {
+      setCopied,
+      timeoutMs: 1500,
+    });
   };
 
   const cpuColor =
     totalCpu > 80
       ? 'text-rose-300'
       : totalCpu > 60
-      ? 'text-amber-300'
-      : 'text-emerald-300';
+        ? 'text-amber-300'
+        : 'text-emerald-300';
 
   const memColor =
     totalMem > 80
       ? 'text-rose-300'
       : totalMem > 60
-      ? 'text-amber-300'
-      : 'text-emerald-300';
+        ? 'text-amber-300'
+        : 'text-emerald-300';
 
   const daemonColor =
     daemonLoad > 80
       ? 'text-rose-300'
       : daemonLoad > 50
-      ? 'text-amber-300'
-      : 'text-emerald-300';
+        ? 'text-amber-300'
+        : 'text-emerald-300';
 
   const strainColor =
     strainScore > 75
       ? 'text-rose-300'
       : strainScore > 50
-      ? 'text-amber-300'
-      : 'text-emerald-300';
+        ? 'text-amber-300'
+        : 'text-emerald-300';
 
   return (
-    <div className="w-full h-full flex flex-col p-3 sm:p-4 text-xs sm:text-sm text-slate-100 overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden p-3 text-xs text-slate-100 sm:p-4 sm:text-sm">
       {/* HEADER */}
-      <div className="flex items-center justify-between mb-3 sm:mb-4 gap-3">
+      <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
         <div className="min-w-0">
-          <h2 className="text-sm sm:text-base font-semibold text-emerald-300 truncate">
+          <h2 className="truncate text-sm font-semibold text-emerald-300 sm:text-base">
             System Monitor – Daemon Load
           </h2>
-          <p className="text-[11px] text-slate-300 truncate">
+          <p className="truncate text-[11px] text-slate-300">
             Reduce overall strain and shut down the overtime daemon safely.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1 text-[10px] text-slate-400">
           <span>Strain score:</span>
           <span
-            className={`px-2 py-0.5 rounded-full border text-[10px] ${strainColor} ${
+            className={`rounded-full border px-2 py-0.5 text-[10px] ${strainColor} ${
               puzzleSolved
                 ? 'border-emerald-400/80 bg-emerald-500/15'
                 : 'border-slate-700/80 bg-slate-950/90'
@@ -230,17 +278,17 @@ const SystemMonitorApp: React.FC = () => {
       </div>
 
       {/* SCROLLABLE CONTENT */}
-      <div className="flex-1 min-h-0 flex flex-col gap-3 sm:gap-4 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto sm:gap-4">
         {/* METRICS CARD */}
-        <div className="rounded-2xl bg-slate-950/95 border border-slate-800/80 p-3 sm:p-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="space-y-3 rounded-2xl border border-slate-800/80 bg-slate-950/95 p-3 sm:p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {/* CPU */}
             <div>
-              <div className="flex items-center justify-between text-[11px] mb-1">
+              <div className="mb-1 flex items-center justify-between text-[11px]">
                 <span className="text-slate-400">CPU usage</span>
                 <span className={cpuColor}>{Math.round(totalCpu)}%</span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-800/80">
+              <div className="h-2 w-full rounded-full bg-slate-800/80">
                 <div
                   className="h-full bg-linear-to-r from-emerald-400 via-amber-400 to-rose-400 transition-all"
                   style={{ width: `${totalCpu}%` }}
@@ -250,11 +298,11 @@ const SystemMonitorApp: React.FC = () => {
 
             {/* MEM */}
             <div>
-              <div className="flex items-center justify-between text-[11px] mb-1">
+              <div className="mb-1 flex items-center justify-between text-[11px]">
                 <span className="text-slate-400">Memory usage</span>
                 <span className={memColor}>{Math.round(totalMem)}%</span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-800/80">
+              <div className="h-2 w-full rounded-full bg-slate-800/80">
                 <div
                   className="h-full bg-linear-to-r from-emerald-400 via-amber-400 to-rose-400 transition-all"
                   style={{ width: `${totalMem}%` }}
@@ -264,11 +312,11 @@ const SystemMonitorApp: React.FC = () => {
 
             {/* DAEMON LOAD */}
             <div>
-              <div className="flex items-center justify-between text-[11px] mb-1">
+              <div className="mb-1 flex items-center justify-between text-[11px]">
                 <span className="text-slate-400">Daemon load</span>
                 <span className={daemonColor}>{Math.round(daemonLoad)}%</span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-800/80">
+              <div className="h-2 w-full rounded-full bg-slate-800/80">
                 <div
                   className="h-full bg-linear-to-r from-slate-500 via-amber-400 to-rose-500 transition-all"
                   style={{ width: `${daemonLoad}%` }}
@@ -278,19 +326,19 @@ const SystemMonitorApp: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-slate-400">
-            The overtime daemon thrives when system strain is high. You need to bring
-            the overall score down before it is safe to terminate the process.
+            The overtime daemon thrives when system strain is high. You need to bring the
+            overall score down before it is safe to terminate the process.
           </p>
         </div>
 
         {/* CONTROL TOGGLES */}
-        <div className="rounded-2xl bg-slate-950/95 border border-slate-800/80 p-3 sm:p-4 space-y-2 text-[11px]">
-          <p className="text-slate-300 mb-1">
+        <div className="space-y-2 rounded-2xl border border-slate-800/80 bg-slate-950/95 p-3 text-[11px] sm:p-4">
+          <p className="mb-1 text-slate-300">
             Use soft controls first. Hard-killing processes while the system is under
             heavy load might make the daemon respawn in a worse mood.
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <button
               type="button"
               onClick={() => {
@@ -298,7 +346,7 @@ const SystemMonitorApp: React.FC = () => {
                 setFocusMode((prev) => !prev);
                 setHint(null);
               }}
-              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-left transition ${
+              className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left transition ${
                 focusMode
                   ? 'border-emerald-400/80 bg-emerald-500/10 text-emerald-100'
                   : 'border-slate-700 bg-slate-950 text-slate-200 hover:border-emerald-400/60'
@@ -322,7 +370,7 @@ const SystemMonitorApp: React.FC = () => {
                 setNotificationsMuted((prev) => !prev);
                 setHint(null);
               }}
-              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-left transition ${
+              className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left transition ${
                 notificationsMuted
                   ? 'border-emerald-400/80 bg-emerald-500/10 text-emerald-100'
                   : 'border-slate-700 bg-slate-950 text-slate-200 hover:border-emerald-400/60'
@@ -346,7 +394,7 @@ const SystemMonitorApp: React.FC = () => {
                 setAutoSyncOff((prev) => !prev);
                 setHint(null);
               }}
-              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-left transition ${
+              className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left transition ${
                 autoSyncOff
                   ? 'border-emerald-400/80 bg-emerald-500/10 text-emerald-100'
                   : 'border-slate-700 bg-slate-950 text-slate-200 hover:border-emerald-400/60'
@@ -366,8 +414,8 @@ const SystemMonitorApp: React.FC = () => {
         </div>
 
         {/* PROCESS LIST + KILL BUTTON */}
-        <div className="rounded-2xl bg-slate-950/95 border border-slate-800/80 p-3 sm:p-4 space-y-3 text-[11px]">
-          <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="space-y-3 rounded-2xl border border-slate-800/80 bg-slate-950/95 p-3 text-[11px] sm:p-4">
+          <div className="mb-1 flex items-center justify-between gap-2">
             <p className="text-slate-300">
               Toggle noisy processes. Then, when the strain is low enough, terminate the
               daemon cleanly.
@@ -375,12 +423,11 @@ const SystemMonitorApp: React.FC = () => {
             <button
               type="button"
               onClick={handleKillDaemon}
-              className={`px-3 py-1.5 rounded-full text-[11px] font-semibold shadow-md transition
-                ${
-                  isDaemonKillEnabled
-                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/50'
-                    : 'bg-slate-800 text-slate-300 shadow-none'
-                }`}
+              className={`rounded-full px-3 py-1.5 text-[11px] font-semibold shadow-md transition ${
+                isDaemonKillEnabled
+                  ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/50 hover:bg-emerald-400'
+                  : 'bg-slate-800 text-slate-300 shadow-none'
+              }`}
             >
               Kill overtime-daemon
             </button>
@@ -393,7 +440,7 @@ const SystemMonitorApp: React.FC = () => {
           )}
 
           <div className="rounded-xl border border-slate-800/80">
-            <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] text-[10px] bg-slate-900/90 border-b border-slate-800/80 px-2 py-1.5 text-slate-400">
+            <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] border-b border-slate-800/80 bg-slate-900/90 px-2 py-1.5 text-[10px] text-slate-400">
               <span>Process</span>
               <span className="text-right">CPU</span>
               <span className="text-right">MEM</span>
@@ -404,24 +451,24 @@ const SystemMonitorApp: React.FC = () => {
                 p.type === 'daemon'
                   ? 'text-rose-300'
                   : p.type === 'noise'
-                  ? 'text-amber-200'
-                  : 'text-slate-200';
+                    ? 'text-amber-200'
+                    : 'text-slate-200';
               return (
                 <div
                   key={p.id}
-                  className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] items-center px-2 py-1.5 mr-2 text-[10px] border-t border-slate-800/80 bg-slate-950/90"
+                  className="mr-2 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] items-center border-t border-slate-800/80 bg-slate-950/90 px-2 py-1.5 text-[10px]"
                 >
                   <span className={`${rowColor} truncate`}>{p.name}</span>
                   <span className="text-right text-slate-300">
                     {p.active ? `${p.cpu}%` : '—'}
                   </span>
-                  <span className="text-right text-slate-300">
+                  <span className="mr-2 text-right text-slate-300">
                     {p.active ? `${p.mem}%` : '—'}
                   </span>
                   <div className="flex justify-end">
                     {p.type === 'daemon' ? (
                       <span
-                        className={`px-2 py-0.5 rounded-full border ${
+                        className={`rounded-full border px-2 py-0.5 ${
                           p.active
                             ? 'border-rose-400/80 bg-rose-500/10 text-rose-200'
                             : 'border-emerald-400/80 bg-emerald-500/10 text-emerald-200'
@@ -433,7 +480,7 @@ const SystemMonitorApp: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => toggleProcess(p.id)}
-                        className={`px-2 py-0.5 rounded-full border transition ${
+                        className={`rounded-full border px-2 py-0.5 transition ${
                           p.active
                             ? 'border-amber-400/80 bg-amber-500/15 text-amber-100 hover:border-amber-300'
                             : 'border-slate-600 bg-slate-800 text-slate-300 hover:border-emerald-400/60'
@@ -450,43 +497,59 @@ const SystemMonitorApp: React.FC = () => {
         </div>
 
         {/* KILL CODE PANEL */}
-        <div className="rounded-2xl bg-slate-950/95 border border-slate-800/80 p-3 sm:p-4 text-[11px]">
+        <div className="rounded-2xl border border-slate-800/80 bg-slate-950/95 p-3 text-[11px] sm:p-4">
           {!puzzleSolved ? (
             <>
-              <p className="text-slate-300 mb-1">
+              <p className="mb-1 text-slate-300">
                 If you slam the “kill” button while the system is still burning, the
                 daemon might just fork itself into a background job.
               </p>
               <p className="text-slate-400">
-                Lower the <span className="font-semibold">strain score</span> first,
-                then terminate <span className="font-mono">overtime-daemon</span> when it
-                least expects it.
+                Lower the <span className="font-semibold">strain score</span> first, then
+                terminate <span className="font-mono">overtime-daemon</span> when it least
+                expects it.
               </p>
             </>
           ) : (
             <div className="space-y-2">
-              <p className="text-emerald-300 font-semibold">
+              <p className="font-semibold text-emerald-300">
                 Overtime-daemon terminated – system load normalized.
               </p>
-              <p className="text-slate-200">
-                With the daemon gone, the monitor briefly exposes a maintenance banner
-                left by some tired engineer:
-              </p>
 
-              <div className="mt-1 rounded-xl border border-emerald-400/80 bg-linear-to-br from-emerald-500/15 via-slate-950 to-emerald-500/10 p-3 shadow-[0_0_20px_rgba(52,211,153,0.45)]">
-                <p className="text-[10px] uppercase tracking-[0.16em] text-emerald-300 mb-1">
+              <div className="mt-1 space-y-2 rounded-xl border border-emerald-400/80 bg-linear-to-br from-emerald-500/15 via-slate-950 to-emerald-500/10 p-3 shadow-[0_0_20px_rgba(52,211,153,0.45)]">
+                <p className="mb-1 text-[10px] tracking-[0.16em] text-emerald-300 uppercase">
                   Kill code fragment unlocked
                 </p>
-                <p className="font-mono text-[11px] text-emerald-100 break-all">
-                  First fragment of the kill code:
-                  <br />
-                  <span className="font-semibold">+SYSTEM-DRAINED</span>
-                </p>
+
+                {/* Input + copy for fragment */}
+                <div className="space-y-1">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      readOnly
+                      value={SYSTEM_FRAGMENT}
+                      className="flex-1 overflow-x-auto rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-[11px] text-emerald-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyFragment}
+                      className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-semibold text-slate-950 shadow-md shadow-emerald-500/40 transition hover:bg-emerald-400"
+                    >
+                      {copied ? 'Copied ✓' : 'Copy'}
+                    </button>
+                  </div>
+                  {copied && (
+                    <p className="text-[10px] text-emerald-300">
+                      Fragment copied. Paste it into your StickyPad along with the other
+                      kill code fragments.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <p className="text-slate-400">
-                Add this fragment to StickyPad. A calm system is the daemon&apos;s
-                least favorite environment.
+                Add this fragment to StickyPad. A calm system is the daemon&apos;s least
+                favorite environment.
               </p>
             </div>
           )}

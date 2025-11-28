@@ -62,37 +62,25 @@ const StickyPadApp: React.FC = () => {
   }, [text]);
 
   return (
-    <div className="w-full h-full flex flex-col p-3 sm:p-4 text-xs sm:text-md text-slate-100">
+    <div className="sm:text-md flex h-full w-full flex-col p-3 text-xs text-slate-100 sm:p-4">
       {/* Header */}
       <div>
-        <h2 className="text-md sm:text-base font-semibold text-emerald-300 mb-1.5">
+        <h2 className="text-md mb-1.5 font-semibold text-emerald-300 sm:text-base">
           StickyPad – Puzzle Notes
         </h2>
-        <p className="text-slate-300 text-[11px] sm:text-xs">
+        <p className="text-[11px] text-slate-300 sm:text-xs">
           Use this sticky area to write hints, kill code fragments and terminal commands.
-          Notes live for about{' '}
-          <span className="font-semibold">1 hour</span> after your last edit.
+          Notes live for about <span className="font-semibold">1 hour</span> after your
+          last edit.
         </p>
       </div>
 
       {/* Textarea fills the rest of the window */}
-      <div className="mt-3 flex-1 min-h-0">
+      <div className="mt-3 min-h-0 flex-1">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          className="
-            w-full h-full
-            min-h-40 sm:min-h-[220px]
-            rounded-xl
-            bg-slate-900/80
-            border border-slate-700/80
-            px-3 py-2
-            text-xs sm:text-md text-slate-100
-            outline-none
-            resize-none
-            overflow-y-auto
-            focus:border-emerald-400/80
-          "
+          className="sm:text-md h-full w-full resize-none overflow-y-auto rounded-xl border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs text-slate-100 outline-none focus:border-emerald-400/80"
           placeholder="notes about the daemon, kill code fragments, weird process names..."
         />
       </div>
